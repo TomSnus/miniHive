@@ -164,11 +164,6 @@ class JoinTask(RelAlgQueryTask):
         raquery = radb.parse.one_statement_from_string(self.querystring)
         condition = raquery.cond
         ''' ...................... fill in your code below ........................'''
-        # del parts[:]
-        # split_recursivee(raquery)
-        # parts_list = remove_duplicates(parts)
-        # join = [x for x in parts_list if isinstance(x, radb.ast.Join)]
-        # if len(join) == 2:
         if isinstance(condition.inputs[0], radb.ast.AttrRef) and isinstance(condition.inputs[1], radb.ast.AttrRef):
             rel1 = condition.inputs[0].rel
             rel2 = condition.inputs[1].rel
@@ -179,11 +174,6 @@ class JoinTask(RelAlgQueryTask):
                     and condition.inputs[1].inputs[0].name == condition.inputs[1].inputs[1].name:
                 yield ([json_tuple[relation + "." + str(condition.inputs[0].inputs[0].name)],
                         json_tuple[relation + "." + str(condition.inputs[1].inputs[0].name)]], (relation, json_tuple))
-            #yield (json_tuple[rel2 + "." + str(condition.inputs[0].name)], (relation, json_tuple))
-        # else:
-        #    if join[0].cond.inputs[0].name == join[0].cond.inputs[1].name:
-        #        attribut = join[0].cond.inputs[0].name
-        #        yield(json_tuple[relation+"."+str(join[0].cond.inputs[0].name)], (relation, json_tuple))
 
         ''' ...................... fill in your code above ........................'''
 
@@ -196,8 +186,6 @@ class JoinTask(RelAlgQueryTask):
         else:
             rel1 = condition.inputs[0].inputs[0].rel
             rel2 = condition.inputs[1].inputs[1].rel
-        condition = raquery.cond
-        oldRelation = None
         solution = {}
         solution_list = []
         solution_list.append(solution)
@@ -213,8 +201,6 @@ class JoinTask(RelAlgQueryTask):
         key_rel1 = [k for k in cnt_list if k == rel1]
         key_rel2 = [k for k in cnt_list if k == rel2]
         max_count = len(key_rel1)*len(key_rel2)
-
-
         list_ = sorted(list_, key=lambda x: x[0])
         cnt = 1
         if not isinstance(key, list):
@@ -237,17 +223,6 @@ class JoinTask(RelAlgQueryTask):
                         solution.update(dic)
                         cnt = cnt+1
                         yield(r, json.dumps(solution))
-
-                # relation, dic = val
-                # if relation == oldRelation:
-                #     i = 1
-                #     #solution.update(dic)
-                # else:
-                #     solution.update(dic)
-                #     oldRelation = relation
-                #     solution = dict()
-                #     yield (key, solution_list)
-
         ''' ...................... fill in your code above ........................'''
 
 
@@ -304,7 +279,6 @@ class RenameTask(RelAlgQueryTask):
     def mapper(self, line):
         relation, tuple = line.split('\t')
         json_tuple = json.loads(tuple)
-        print(">>>" + str(self.step) + " RENAME, do this " + self.querystring + " my input " + line)
         raquery = radb.parse.one_statement_from_string(self.querystring)
         ''' ...................... fill in your code below ........................'''
         del parts[:]

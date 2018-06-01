@@ -124,7 +124,6 @@ def translate(statement):
             project = joined_relations
         else:
             project = radb.ast.Project(attributes, joined_relations)
-    print(project)
     parsed = radb.parse.one_statement_from_string(str(project)+";")
     return parsed
 

@@ -292,8 +292,6 @@ class RenameTask(RelAlgQueryTask):
         solution_list = []
         solution_list.append(dic_)
 
-        print(">>> my output: " + json.dumps(dic_))
-
         yield (rename[0].relname, json.dumps(dic_))
         ''' ...................... fill in your code above ........................'''
 

@@ -7,6 +7,8 @@ from luigi.mock import MockTarget
 import radb
 import radb.ast
 import radb.parse
+import raopt
+import sqlparse
 
 '''
 Control where the input data comes from, and where output data should go.
@@ -22,6 +24,9 @@ class ExecEnv(Enum):
 '''
 Switches between different execution environments and file systems.
 '''
+parts = []
+
+
 
 
 class OutputMixin(luigi.Task):
@@ -141,61 +146,67 @@ class JoinTask(RelAlgQueryTask):
 
         raquery = radb.parse.one_statement_from_string(self.querystring)
         condition = raquery.cond
+        ''' ...................... fill in your code below ........................'''
+        if isinstance(condition.inputs[0], radb.ast.AttrRef) and isinstance(condition.inputs[1], radb.ast.AttrRef):
+            rel1 = condition.inputs[0].rel
+            rel2 = condition.inputs[1].rel
+            if condition.inputs[0].name == condition.inputs[1].name:
+                yield (json_tuple[relation + "." + str(condition.inputs[0].name)], (relation, json_tuple))
+        elif isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[1], radb.ast.ValExprBinaryOp):
+            if condition.inputs[0].inputs[0].name == condition.inputs[0].inputs[1].name\
+                    and condition.inputs[1].inputs[0].name == condition.inputs[1].inputs[1].name:
+                yield ([json_tuple[relation + "." + str(condition.inputs[0].inputs[0].name)],
+                        json_tuple[relation + "." + str(condition.inputs[1].inputs[0].name)]], (relation, json_tuple))
 
-        if isinstance(condition.inputs[0], radb.ast.AttrRef):
-            result = JoinTask.extract_key(condition, json_tuple)
-            yield (result[1], [result[0], tuple])
-        elif isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
-            relation = None
-            attributes = []
-            for sub_condition in condition.inputs:
-                result = JoinTask.extract_key(sub_condition, json_tuple)
-                if relation is None:
-                    relation = result[0]
-                attributes.append(result[1])
-            yield (str(attributes), [relation, tuple])
-            # yield (str(attributes), [self.step, tuple])
-
-    @staticmethod
-    def extract_key(condition, json_tuple):
-        if str(condition.inputs[0]) in json_tuple:
-            return str(condition.inputs[0].rel), json_tuple[str(condition.inputs[0])]
-        elif condition.inputs[0].name in json_tuple:
-            return str(condition.inputs[0].rel), json_tuple[condition.inputs[0].name]
-        elif str(condition.inputs[1]) in json_tuple:
-            return str(condition.inputs[1].rel), json_tuple[str(condition.inputs[1])]
-        else:
-            return str(condition.inputs[1].rel), json_tuple[condition.inputs[1].name]
+        ''' ...................... fill in your code above ........................'''
 
     def reducer(self, key, values):
-        relation_1 = None
-        relation_2 = None
-        first_relation_records = []
-        second_relation_records = []
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        condition = raquery.cond
+        if not isinstance(key, list):
+            rel1 = condition.inputs[0].rel
+            rel2 = condition.inputs[1].rel
+        else:
+            rel1 = condition.inputs[0].inputs[0].rel
+            rel2 = condition.inputs[1].inputs[1].rel
+        solution = {}
+        solution_list = []
+        solution_list.append(solution)
+        ''' ...................... fill in your code below ........................'''
 
-        for value in values:
-            if relation_1 is None:
-                relation_1 = value[0]
+        list_ = list(values)
 
-            entry = json.loads(value[1])
-            if relation_1 == value[0]:
-                if entry not in first_relation_records:
-                    first_relation_records.append(entry)
-            else:
-                if relation_2 is None:
-                    relation_2 = value[0]
-                if entry not in second_relation_records:
-                    second_relation_records.append(entry)
-
-        for record_1 in first_relation_records:
-            for record_2 in second_relation_records:
-                yield (self.step, JoinTask.join_values(record_1, record_2))
-
-    @staticmethod
-    def join_values(first_record, second_record):
-        result = dict(first_record)
-        result.update(second_record)
-        return json.dumps(result)
+        cnt_list = []
+        # get numbber of producint records
+        for item in list_:
+            rel, dictionary = item
+            cnt_list.append(rel)
+        key_rel1 = [k for k in cnt_list if k == rel1]
+        key_rel2 = [k for k in cnt_list if k == rel2]
+        max_count = len(key_rel1)*len(key_rel2)
+        list_ = sorted(list_, key=lambda x: x[0])
+        cnt = 1
+        if not isinstance(key, list):
+            for v in list_:
+                r, d = v
+                solution.update(d)
+                for val in list_:
+                    relation, dic = val
+                    if r != relation and cnt <= max_count:
+                        solution.update(dic)
+                        cnt = cnt+1
+                        yield(r, json.dumps(solution))
+        else:
+            for v in list_:
+                r, d = v
+                solution.update(d)
+                for val in list_:
+                    relation, dic = val
+                    if r != relation and cnt <= max_count:
+                        solution.update(dic)
+                        cnt = cnt+1
+                        yield(r, json.dumps(solution))
+        ''' ...................... fill in your code above ........................'''
 
 
 class SelectTask(RelAlgQueryTask):
@@ -211,48 +222,55 @@ class SelectTask(RelAlgQueryTask):
         json_tuple = json.loads(tuple)
 
         condition = radb.parse.one_statement_from_string(self.querystring).cond
-
-        if SelectTask.check_conditions(condition, relation, json_tuple):
-            yield (relation, tuple)
-
-    @staticmethod
-    def check_conditions(condition, relation, json_tuple):
-        if isinstance(condition.inputs[0], radb.ast.AttrRef) or isinstance(condition.inputs[0], radb.ast.RAString):
-            left_attribute = SelectTask.add_relation_to_attribute(condition.inputs[0], relation)
-            right_attribute = SelectTask.add_relation_to_attribute(condition.inputs[1], relation)
-
-            if isinstance(left_attribute, radb.ast.AttrRef) and left_attribute.rel is not None:
-                if str(left_attribute) in json_tuple:
-                    return str(json_tuple[str(left_attribute)]) == SelectTask.extract_value(right_attribute)
-                elif left_attribute.name in json_tuple:
-                    return str(json_tuple[left_attribute.name]) == SelectTask.extract_value(right_attribute)
-            elif isinstance(right_attribute, radb.ast.AttrRef) and right_attribute.rel is not None:
-                if str(right_attribute) in json_tuple:
-                    return str(json_tuple[str(right_attribute)]) == SelectTask.extract_value(left_attribute)
-                elif right_attribute.name in json_tuple:
-                    return str(json_tuple[right_attribute.name]) == SelectTask.extract_value(left_attribute)
-
-            return True
+        ''' ...................... fill in your code below ........................'''
+        if not isinstance(condition.inputs[0], radb.ast.AttrRef) and not isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp) == 1:
+            tmp_ = condition.inputs[0]
+            condition.inputs[0] = condition.inputs[1]
+            condition.inputs[1] = tmp_
+        if isinstance(condition, radb.ast.ValExprBinaryOp) and not isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+            for k, v in json_tuple.items():
+                if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                    if isinstance(condition.inputs[1], radb.ast.Literal):
+                        if str(condition.inputs[0].name) in str(k):
+                            condi = str(condition.inputs[1].val).replace('\'', '') #remove special characters
+                            condi = condi.replace('\'', '')
+                            if str(condi) == str(v):
+                                yield (relation, json.dumps(json_tuple))
         else:
-            if not SelectTask.check_conditions(condition.inputs[0], relation, json_tuple):
-                return False
-            return SelectTask.check_conditions(condition.inputs[1], relation, json_tuple)
-
-    @staticmethod
-    def add_relation_to_attribute(attribute, relation):
-        if isinstance(attribute, radb.ast.AttrRef) and not attribute.name.startswith('\'') and attribute.rel is None:
-            attribute.rel = relation
-        return attribute
-
-    @staticmethod
-    def extract_value(attribute):
-        if isinstance(attribute, radb.ast.RAString):
-            return attribute.val.replace('\'', '')
-        else:
-            return attribute.val
+            condi_1 = condition.inputs[0]
+            condi_2 = condition.inputs[1]
+            #for k, v in json_tuple.items():
+            if str(relation + "." + condi_1.inputs[0].name) in json_tuple.keys() and str(
+                    relation + "." + condi_2.inputs[0].name) in json_tuple.keys():
+                condi_1_val = str(condi_1.inputs[1].val).replace('\'', '')
+                condi_1_val = condi_1_val.replace('\'', '')
+                condi_2_val = str(condi_2.inputs[1].val).replace('\'', '')
+                condi_2_val = condi_2_val.replace('\'', '')
+                if condi_1_val in json_tuple.values() and float(condi_2_val) in json_tuple.values():
+                    yield (relation, json.dumps(json_tuple))
+        ''' ...................... fill in your code above ........................'''
 
 
 class RenameTask(RelAlgQueryTask):
+
+    @staticmethod
+    def split_recursivee(ra):
+        if ra is not None:
+            parts.append(ra)
+            if isinstance(ra, radb.ast.Select):
+                RenameTask.split_recursivee(ra.cond)
+            for item in ra.inputs:
+                RenameTask.split_recursivee(item)
+
+    @staticmethod
+    def remove_duplicates(values):
+        output = []
+        seen = set()
+        for value in values:
+            if value not in seen:
+                output.append(value)
+                seen.add(value)
+        return output
 
     def requires(self):
         raquery = radb.parse.one_statement_from_string(self.querystring)
@@ -263,12 +281,21 @@ class RenameTask(RelAlgQueryTask):
     def mapper(self, line):
         relation, tuple = line.split('\t')
         json_tuple = json.loads(tuple)
-
         raquery = radb.parse.one_statement_from_string(self.querystring)
+        ''' ...................... fill in your code below ........................'''
+        del parts[:]
+        dic_ = dict()
+        RenameTask.split_recursivee(raquery)
+        parts_list = RenameTask.remove_duplicates(parts)
+        rename = [x for x in parts_list if isinstance(x, radb.ast.Rename)]
+        for k, v in json_tuple.items():
+            dic_[str(k).replace(relation, rename[0].relname)] = v
+        tuple_ = (json_tuple)
+        solution_list = []
+        solution_list.append(dic_)
 
-        corrected_dict = {k.replace(relation, raquery.relname): v for k, v in json_tuple.items()}
-
-        yield (relation, str(corrected_dict).replace('\'', '\"'))
+        yield (rename[0].relname, json.dumps(dic_))
+        ''' ...................... fill in your code above ........................'''
 
 
 class ProjectTask(RelAlgQueryTask):
@@ -281,22 +308,30 @@ class ProjectTask(RelAlgQueryTask):
 
     def mapper(self, line):
         relation, tuple = line.split('\t')
-        json_tuple = json.loads(tuple)
+        json_dic = json.loads(tuple)
+        attrs = radb.parse.one_statement_from_string(self.querystring).attrs
+        ''' ...................... fill in your code below ........................'''
+        for k in list(json_dic.keys()):
+            dic_ = dict()
+            for k in list(json_dic.keys()):
+                for attr in attrs:
+                    if (isinstance(attr, radb.ast.AttrRef)):
+                        if (str(attr.name) in str(k)) and str(
+                                k) not in dic_.keys():  # and str(v) not in dic_.values() and str(k) not in dic_.keys():
+                            dic_[k] = json_dic[k]
+            yield (json.dumps(dic_), json.dumps(dic_))
 
-        raquery = radb.parse.one_statement_from_string(self.querystring)
-
-        result = {}
-        for attribute in raquery.attrs:
-            if attribute.name in json_tuple:
-                attribute = attribute.name
-            else:
-                attribute = str(SelectTask.add_relation_to_attribute(attribute, relation))
-            result[attribute] = json_tuple[attribute]
-
-        yield (str(result).replace('\'', '\"'), relation)
+        ''' ...................... fill in your code above ........................'''
 
     def reducer(self, key, values):
-        yield (next(values), key)
+
+        ''' ...................... fill in your code below ........................'''
+        seen = None
+        for item in values:
+            if item != seen:
+                seen = item
+                yield (key, [item])
+        ''' ...................... fill in your code above ........................'''
 
 
 if __name__ == '__main__':

@@ -70,6 +70,21 @@ def push_down_selections(ra, dd):
 
     return build_pushed_down_selections_ra(first_cross_join, selections, dd)
 
+def push_down_projection(ra, dd):
+    selections = [ra]
+    first_cross_join = None
+
+    while selections[- 1].inputs is not None:
+        inputs = selections[- 1].inputs[0]
+        if isinstance(inputs, radb.ast.Project):
+            selections.append(inputs)
+        elif isinstance(inputs, radb.ast.Cross):
+            first_cross_join = inputs
+            break
+        else:
+            return ra
+
+    return build_pushed_down_projection_ra(first_cross_join, selections, dd)
 
 def build_pushed_down_selections_ra(first_cross_join, selections, dd):
     new_ra = first_cross_join
@@ -112,6 +127,47 @@ def build_pushed_down_selections_ra(first_cross_join, selections, dd):
 
     return new_ra
 
+def build_pushed_down_projection_ra(first_cross_join, selections, dd):
+
+    new_ra = first_cross_join
+    for selection in selections:
+        insertion_point = new_ra
+        previous_statement = None
+        previous_index = None
+        while insertion_point is not None:
+            if isinstance(insertion_point, radb.ast.Cross):
+                for i in range(len(insertion_point.inputs)):
+                    if isinstance(insertion_point.inputs[i], radb.ast.Cross):
+                        continue
+                    else:
+                        insertion_index = get_selection_insertion_index(selection, insertion_point.inputs[i], dd, i)
+                        if insertion_index is None:
+                            # insertion point found
+                            if previous_statement is None:
+                                selection.inputs[0] = new_ra
+                                new_ra = selection
+                            else:
+                                selection.inputs[0] = previous_statement.inputs[previous_index]
+                                previous_statement.inputs[i] = selection
+                            insertion_point = None
+                        else:
+                            previous_statement = insertion_point
+                            previous_index = insertion_index
+                            insertion_point = insertion_point.inputs[insertion_index]
+
+                        break
+
+            elif isinstance(insertion_point, radb.ast.Project):
+                previous_statement = insertion_point
+                previous_index = 0
+                insertion_point = insertion_point.inputs[0]
+
+            else:
+                selection.inputs[0] = previous_statement.inputs[previous_index]
+                previous_statement.inputs[previous_index] = selection
+                break
+
+    return new_ra
 
 def get_selection_insertion_index(selection, relation, dd, index):
     relation = extract_relation(relation)

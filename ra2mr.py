@@ -7,8 +7,8 @@ from luigi.mock import MockTarget
 import radb
 import radb.ast
 import radb.parse
-import raopt
-import sqlparse
+#import raopt
+#import sqlparse
 
 '''
 Control where the input data comes from, and where output data should go.
@@ -27,6 +27,23 @@ Switches between different execution environments and file systems.
 parts = []
 
 
+def split_recursivee(ra):
+    if ra is not None:
+        parts.append(ra)
+        if isinstance(ra, radb.ast.Select):
+            split_recursivee(ra.cond)
+        for item in ra.inputs:
+            split_recursivee(item)
+
+
+def remove_duplicates(values):
+    output = []
+    seen = set()
+    for value in values:
+        if value not in seen:
+            output.append(value)
+            seen.add(value)
+    return output
 
 
 class OutputMixin(luigi.Task):
@@ -253,25 +270,6 @@ class SelectTask(RelAlgQueryTask):
 
 class RenameTask(RelAlgQueryTask):
 
-    @staticmethod
-    def split_recursivee(ra):
-        if ra is not None:
-            parts.append(ra)
-            if isinstance(ra, radb.ast.Select):
-                RenameTask.split_recursivee(ra.cond)
-            for item in ra.inputs:
-                RenameTask.split_recursivee(item)
-
-    @staticmethod
-    def remove_duplicates(values):
-        output = []
-        seen = set()
-        for value in values:
-            if value not in seen:
-                output.append(value)
-                seen.add(value)
-        return output
-
     def requires(self):
         raquery = radb.parse.one_statement_from_string(self.querystring)
         assert (isinstance(raquery, radb.ast.Rename))
@@ -285,8 +283,8 @@ class RenameTask(RelAlgQueryTask):
         ''' ...................... fill in your code below ........................'''
         del parts[:]
         dic_ = dict()
-        RenameTask.split_recursivee(raquery)
-        parts_list = RenameTask.remove_duplicates(parts)
+        split_recursivee(raquery)
+        parts_list = remove_duplicates(parts)
         rename = [x for x in parts_list if isinstance(x, radb.ast.Rename)]
         for k, v in json_tuple.items():
             dic_[str(k).replace(relation, rename[0].relname)] = v
